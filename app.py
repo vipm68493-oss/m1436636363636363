@@ -8,6 +8,9 @@ from flask import Flask, render_template_string, request, redirect, url_for, jso
 
 app = Flask(__name__)
 
+UPLOAD_FOLDER = "uploaded"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 bot_process = None
 log_buffer = []
 current_file = None
@@ -24,118 +27,86 @@ HTML_TEMPLATE = """
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-            color: #e2e8f0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
+            color: #e2e8f0; padding: 20px;
+            display: flex; justify-content: center; align-items: flex-start;
             min-height: 100vh;
         }
         .container {
-            width: 100%;
-            max-width: 960px;
-            background: #1e293b;
-            border-radius: 18px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-            overflow: hidden;
-            border: 1px solid #334155;
+            width: 100%; max-width: 960px; background: #1e293b;
+            border-radius: 18px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6);
+            overflow: hidden; border: 1px solid #334155;
         }
-        .header {
-            background: linear-gradient(90deg, #2563eb, #7c3aed);
-            padding: 24px;
-            text-align: center;
-        }
-        .header h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+        .header { background: linear-gradient(90deg,#2563eb,#7c3aed); padding:24px; text-align:center; }
+        .header h1 { font-size: 26px; font-weight: 700; }
         .header p { font-size: 13px; opacity: 0.85; margin-top: 4px; }
         .status-bar {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 16px 24px; background: #1e293b; border-bottom: 1px solid #334155;
-            flex-wrap: wrap; gap: 12px;
+            display:flex; align-items:center; justify-content:space-between;
+            padding:16px 24px; background:#1e293b; border-bottom:1px solid #334155;
+            flex-wrap:wrap; gap:12px;
         }
-        .status-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .status-info { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
         .status-badge {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 7px 14px; border-radius: 9999px;
-            font-size: 14px; font-weight: 600;
+            display:inline-flex; align-items:center; gap:8px;
+            padding:7px 14px; border-radius:9999px; font-size:14px; font-weight:600;
         }
-        .status-running { background: #064e3b; color: #6ee7b7; border: 1px solid #10b981; }
-        .status-stopped { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; }
-        .dot { width: 9px; height: 9px; border-radius: 50%; }
-        .dot-green { background: #10b981; animation: pulse 1.8s infinite; }
-        .dot-red { background: #ef4444; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        .file-tag {
-            font-size: 13px; padding: 6px 12px; border-radius: 8px;
-            background: #334155; color: #93c5fd; font-family: monospace;
+        .status-running { background:#064e3b; color:#6ee7b7; border:1px solid #10b981; }
+        .status-stopped { background:#7f1d1d; color:#fca5a5; border:1px solid #ef4444; }
+        .dot { width:9px; height:9px; border-radius:50%; }
+        .dot-green { background:#10b981; animation:pulse 1.8s infinite; }
+        .dot-red { background:#ef4444; }
+        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+        .file-tag { font-size:13px; padding:6px 12px; border-radius:8px;
+            background:#334155; color:#93c5fd; font-family:monospace; }
+        .section { padding:18px 24px; border-bottom:1px solid #334155; background:#0f172a; }
+        .section h3 { font-size:14px; color:#94a3b8; margin-bottom:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+        .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+        .row select, .row input[type=file] {
+            flex:1; min-width:200px; padding:10px 14px;
+            background:#1e293b; color:#e2e8f0;
+            border:1px solid #475569; border-radius:8px; font-size:14px; outline:none;
         }
-        .file-selector {
-            display: flex; gap: 10px; padding: 16px 24px;
-            background: #0f172a; border-bottom: 1px solid #334155;
-            align-items: center; flex-wrap: wrap;
+        .row select:focus { border-color:#3b82f6; }
+        input[type=file]::file-selector-button {
+            background:#475569; color:white; border:none; padding:6px 12px;
+            border-radius:6px; cursor:pointer; margin-right:8px; font-size:13px;
         }
-        .file-selector label { font-size: 14px; color: #94a3b8; font-weight: 500; }
-        .file-selector select {
-            flex: 1; min-width: 200px; padding: 10px 14px;
-            background: #1e293b; color: #e2e8f0;
-            border: 1px solid #475569; border-radius: 8px;
-            font-size: 14px; cursor: pointer; outline: none;
-        }
-        .file-selector select:focus { border-color: #3b82f6; }
         .controls {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 12px; padding: 20px 24px;
+            display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+            gap:12px; padding:20px 24px;
         }
         .btn {
-            padding: 13px 20px; border: none; border-radius: 10px;
-            font-size: 15px; font-weight: 600; cursor: pointer;
-            transition: all 0.15s; display: inline-flex;
-            align-items: center; justify-content: center; gap: 6px;
-            text-decoration: none; color: white;
+            padding:13px 20px; border:none; border-radius:10px;
+            font-size:15px; font-weight:600; cursor:pointer;
+            transition:all 0.15s; display:inline-flex;
+            align-items:center; justify-content:center; gap:6px; color:white;
         }
         .btn:active { transform: scale(0.97); }
-        .btn-primary { background: #3b82f6; }
-        .btn-primary:hover { background: #2563eb; }
-        .btn-danger { background: #ef4444; }
-        .btn-danger:hover { background: #dc2626; }
-        .btn-warning { background: #f59e0b; color: #1e293b; }
-        .btn-warning:hover { background: #d97706; }
-        .btn-secondary { background: #475569; }
-        .btn-secondary:hover { background: #334155; }
-        .btn-success { background: #10b981; }
-        .btn-success:hover { background: #059669; }
-        .terminal {
-            margin: 0 24px 24px 24px; background: #000;
-            border-radius: 10px; overflow: hidden; border: 1px solid #334155;
-        }
-        .terminal-header {
-            background: #1e293b; padding: 10px 18px;
-            font-size: 12px; color: #94a3b8;
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .terminal-body {
-            padding: 16px; height: 380px; overflow-y: auto;
-            font-family: 'Consolas', 'Courier New', monospace;
-            font-size: 13px; color: #a5f3fc; line-height: 1.6;
-            white-space: pre-wrap; word-break: break-all;
-        }
-        .terminal-body::-webkit-scrollbar { width: 8px; }
-        .terminal-body::-webkit-scrollbar-track { background: #0f172a; }
-        .terminal-body::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-        .log-line { margin-bottom: 2px; }
-        .log-error { color: #fca5a5; }
-        .log-info { color: #6ee7b7; }
-        .log-warn { color: #fcd34d; }
-        .footer {
-            text-align: center; padding: 14px; font-size: 12px;
-            color: #64748b; border-top: 1px solid #334155;
-        }
+        .btn-primary { background:#3b82f6; } .btn-primary:hover { background:#2563eb; }
+        .btn-danger { background:#ef4444; } .btn-danger:hover { background:#dc2626; }
+        .btn-warning { background:#f59e0b; color:#1e293b; } .btn-warning:hover { background:#d97706; }
+        .btn-secondary { background:#475569; } .btn-secondary:hover { background:#334155; }
+        .btn-success { background:#10b981; } .btn-success:hover { background:#059669; }
+        .terminal { margin:0 24px 24px 24px; background:#000;
+            border-radius:10px; overflow:hidden; border:1px solid #334155; }
+        .terminal-header { background:#1e293b; padding:10px 18px;
+            font-size:12px; color:#94a3b8; display:flex; justify-content:space-between; }
+        .terminal-body { padding:16px; height:360px; overflow-y:auto;
+            font-family:'Consolas','Courier New',monospace; font-size:13px;
+            color:#a5f3fc; line-height:1.6; white-space:pre-wrap; word-break:break-all; }
+        .terminal-body::-webkit-scrollbar { width:8px; }
+        .terminal-body::-webkit-scrollbar-track { background:#0f172a; }
+        .terminal-body::-webkit-scrollbar-thumb { background:#475569; border-radius:4px; }
+        .log-line { margin-bottom:2px; }
+        .log-error { color:#fca5a5; } .log-info { color:#6ee7b7; } .log-warn { color:#fcd34d; }
+        .footer { text-align:center; padding:14px; font-size:12px;
+            color:#64748b; border-top:1px solid #334155; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🐍 Python Runner Control Panel</h1>
-            <p>Select any Python file, run it, and watch live logs</p>
+            <p>Upload a .py file or select an existing one, then run it</p>
         </div>
 
         <div class="status-bar">
@@ -152,18 +123,28 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <form class="file-selector" method="post" action="/select">
-            <label for="pyfile">Choose Python file:</label>
-            <select name="pyfile" id="pyfile">
-                {% for f in py_files %}
-                <option value="{{ f }}" {% if f == current_file %}selected{% endif %}>{{ f }}</option>
-                {% endfor %}
-                {% if not py_files %}
-                <option value="">No .py files found</option>
-                {% endif %}
-            </select>
-            <button type="submit" class="btn btn-secondary" style="padding:10px 18px;">Select</button>
-        </form>
+        <div class="section">
+            <h3>📤 Upload Python File</h3>
+            <form method="post" action="/upload" enctype="multipart/form-data" class="row">
+                <input type="file" name="file" accept=".py" required>
+                <button type="submit" class="btn btn-success" style="padding:10px 18px;">Upload</button>
+            </form>
+        </div>
+
+        <div class="section">
+            <h3>📁 Select Existing File</h3>
+            <form method="post" action="/select" class="row">
+                <select name="pyfile">
+                    {% for f in py_files %}
+                    <option value="{{ f }}" {% if f == current_file %}selected{% endif %}>{{ f }}</option>
+                    {% endfor %}
+                    {% if not py_files %}
+                    <option value="">No .py files found</option>
+                    {% endif %}
+                </select>
+                <button type="submit" class="btn btn-secondary" style="padding:10px 18px;">Select</button>
+            </form>
+        </div>
 
         <div class="controls">
             <form action="/start" method="post" style="display:contents;">
@@ -193,7 +174,7 @@ HTML_TEMPLATE = """
                 <div class="log-line {% if 'Error' in line or 'Traceback' in line or 'Exception' in line or 'ERROR' in line %}log-error{% elif 'WARNING' in line %}log-warn{% elif 'INFO' in line %}log-info{% endif %}">{{ line }}</div>
                 {% endfor %}
                 {% if not logs %}
-                <div style="color:#64748b;">No logs yet. Select a file and press Start.</div>
+                <div style="color:#64748b;">No logs yet. Upload or select a file and press Start.</div>
                 {% endif %}
             </div>
         </div>
@@ -217,7 +198,7 @@ HTML_TEMPLATE = """
                         }).join('');
                         logBox.scrollTop = logBox.scrollHeight;
                     } else {
-                        logBox.innerHTML = '<div style="color:#64748b;">No logs yet. Select a file and press Start.</div>';
+                        logBox.innerHTML = '<div style="color:#64748b;">No logs yet. Upload or select a file and press Start.</div>';
                     }
                     const badge = document.getElementById('status-badge');
                     const dot = document.getElementById('status-dot');
@@ -240,8 +221,9 @@ HTML_TEMPLATE = """
 """
 
 def list_py_files():
-    files = [f for f in glob.glob("*.py") if f != "app.py"]
-    return sorted(files)
+    root_files = [f for f in glob.glob("*.py") if f != "app.py"]
+    uploaded = [os.path.join(UPLOAD_FOLDER, f) for f in glob.glob(os.path.join(UPLOAD_FOLDER, "*.py"))]
+    return sorted(root_files + uploaded)
 
 def read_logs():
     global log_buffer
@@ -266,11 +248,8 @@ def start_process(filename):
     try:
         bot_process = subprocess.Popen(
             [sys.executable, "-u", filename],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=os.environ.copy(),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, env=os.environ.copy(),
         )
 
         def read_output():
@@ -306,10 +285,8 @@ def stop_process():
 @app.route('/')
 def index():
     return render_template_string(
-        HTML_TEMPLATE,
-        is_running=is_running(),
-        logs=read_logs(),
-        py_files=list_py_files(),
+        HTML_TEMPLATE, is_running=is_running(),
+        logs=read_logs(), py_files=list_py_files(),
         current_file=current_file,
     )
 
@@ -317,6 +294,20 @@ def index():
 def select():
     global current_file
     current_file = request.form.get('pyfile', '')
+    return redirect(url_for('index'))
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    global current_file, log_buffer
+    f = request.files.get('file')
+    if not f or not f.filename.endswith('.py'):
+        log_buffer.append("ERROR: Please upload a .py file")
+        return redirect(url_for('index'))
+    safe_name = os.path.basename(f.filename)
+    path = os.path.join(UPLOAD_FOLDER, safe_name)
+    f.save(path)
+    current_file = path
+    log_buffer.append(f"--- Uploaded {safe_name} ---")
     return redirect(url_for('index'))
 
 @app.route('/start', methods=['POST'])
@@ -345,7 +336,7 @@ def restart():
 @app.route('/install', methods=['POST'])
 def install():
     global log_buffer
-    log_buffer.append("--- Installing dependencies (pip install -r requirements.txt) ---")
+    log_buffer.append("--- Installing dependencies ---")
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
